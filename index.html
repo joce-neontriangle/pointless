@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Neon Shinjuku Drift</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Three.js for 3D rendering --><script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <!-- Tone.js for sound effects --><script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+
+    <!-- Firebase SDK Imports (Module Type Required) --><script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, collection, query, limit, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Expose Firebase objects globally for use in the main script
+        window.firebase = { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore, doc, setDoc, onSnapshot, collection, query, limit, getDocs };
+        
+        // This IIFE will run immediately to start the game initialization once imports are done
+        window.initApp();
+    </script>
+    
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+        
+        :root {
+            --color-neon-blue: #00ffff;
+            --color-neon-pink: #ff00ff;
+            --color-neon-green: #00ff00;
+            --color-dark: #1a1a1a;
+            --color-city-glow: #6a0dad; /* Purple for distant city glow */
+        }
+
+        body {
+            font-family: 'Press Start 2P', monospace;
+            background-color: var(--color-dark);
+            color: var(--color-neon-green);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 1rem;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #game-cabinet {
+            width: 100%;
+            max-width: 700px;
+            height: 80vh;
+            background: #000;
+            border: 8px solid var(--color-neon-pink);
+            box-shadow: 0 0 20px rgba(255, 0, 255, 0.5), inset 0 0 10px rgba(255, 0, 255, 0.5);
+            padding: 10px;
+            border-radius: 4px;
+            position: relative;
+        }
+
+        #game-container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+            background-color: #0d1216; /* Darker background to let neon pop */
+            border: 4px solid var(--color-neon-blue);
+            overflow: hidden;
+        }
+
+        /* Canvas will be injected here by Three.js */
+        
+        .score-panel {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            min-height: 50px;
+            padding: 8px 16px;
+            z-index: 10;
+            background: rgba(0, 0, 0, 0.7);
+            border-bottom: 2px dashed var(--color-neon-green);
+        }
+
+        /* Message Overlay */
+        #game-message {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.9);
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            z-index: 50;
+            color: var(--color-neon-blue);
+        }
+
+        .btn-retro {
+            padding: 10px 20px;
+            border: 3px solid var(--color-neon-pink);
+            background-color: #333;
+            color: var(--color-neon-green);
+            text-shadow: 1px 1px 0 #000;
+            box-shadow: 2px 2px 0 #880088, 4px 4px 0 #000;
+            transform: translate(-4px, -4px);
+            transition: transform 0.1s, box-shadow 0.1s;
+        }
+        .btn-retro:active {
+            box-shadow: 0 0 0 #000;
+            transform: translate(0, 0);
+        }
+        
+        #leaderboard {
+            width: 100%;
+            margin-top: 10px;
+            padding: 10px;
+            border: 2px solid var(--color-neon-blue);
+            background-color: #050505;
+            color: var(--color-neon-blue);
+            font-size: 10px;
+        }
+        .leaderboard-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+        }
+        .user-id-display {
+            font-size: 8px;
+            color: var(--color-neon-pink);
+            margin-top: 4px;
+            padding: 4px 8px;
+            border: 1px dashed var(--color-neon-pink);
+        }
+        .initials-input {
+            background: black;
+            color: var(--color-neon-green);
+            border: 2px solid var(--color-neon-pink);
+            width: 80px;
+            text-align: center;
+            font-family: 'Press Start 2P', monospace;
+            padding: 5px;
+            margin-top: 10px;
+            text-transform: uppercase;
+        }
+
+    </style>
+</head>
+<body>
+
+<div id="game-cabinet" class="shadow-xl">
+    <div id="game-container" class="relative">
+        
+        <div class="score-panel flex justify-between items-center text-xs">
+            <div id="score-display">SCORE: 00000</div>
+            <div id="distance-display">DISTANCE: 0</div>
+            <div id="speed-display">SPEED: 1</div>
+        </div>
+
+        <!-- Game Message Overlay --><div id="game-message">
+            <h1 class="text-3xl text-pink-500 mb-4">3D NEON SHINJUKU DRIFT</h1>
+            <p id="message-text" class="text-xl text-white mb-6">Press START to ignite the engine.</p>
+            
+            <div id="initials-prompt" class="hidden flex flex-col items-center">
+                <p class="text-sm text-yellow-400 mb-2">ENTER 3 INITIALS:</p>
+                <input type="text" id="initials-input" maxlength="3" class="initials-input" />
+            </div>
+
+            <p class="text-sm text-blue-400 mb-8 mt-4" id="controls-text">
+                LEFT/RIGHT or A/D: Drift Lanes
+            </p>
+            <button id="start-button" class="btn-retro text-lg">START RACE</button>
+        </div>
+    </div>
+
+    <!-- Leaderboard Section --><div id="leaderboard" class="mt-4">
+        <h3 class="text-center mb-2">TOP DRIFTERS</h3>
+        <div id="leaderboard-list">Loading scores...</div>
+    </div>
+    <div id="user-id-container" class="text-center">
+        <div id="user-id-display" class="user-id-display">Connecting...</div>
+    </div>
+
+    <div id="instructions" class="text-xs text-center p-2 text-gray-500 absolute bottom-0 left-0 right-0 z-10">
+        Avoid Patrol Cars (red cubes) and collect Yen (yellow spheres).
+    </div>
+</div>
+
+<script>
+    // Global references for Firebase/Auth/Firestore
+    let db = null;
+    let auth = null;
+    let userId = null;
+
+    // --- FIREBASE CONSTANTS (MUST be available for the script environment) ---
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    // FIX: Corrected variable access for firebaseConfig
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+    const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+    const LEADERBOARD_COLLECTION = `artifacts/${appId}/public/data/leaderboard`;
+
+
+    // --- GAME CONSTANTS & STATE ---
+    const NUM_LANES = 5;
+    const LANE_SPACING = 5; 
+    const ROAD_WIDTH = (NUM_LANES - 1) * LANE_SPACING;
+    const PLAYER_Z = -5; 
+    const LANE_POSITIONS = Array.from({ length: NUM_LANES }, (_, i) => 
+        i * LANE_SPACING - (ROAD_WIDTH / 2)
+    );
+    const PLAYER_SIZE = 1;
+    const ENEMY_SIZE = 2;
+    const ITEM_SIZE = 1;
+    const COLOR_NEON_BLUE = 0x00ffff;
+    const COLOR_NEON_PINK = 0xff00ff;
+    const COLOR_NEON_GREEN = 0x00ff00;
+    const COLOR_BLACK = 0x000000; 
+    const COLOR_ROAD_DARK = 0x1a1a1a;
+    const COLOR_ROAD_LIGHT = 0x333333;
+    const COLOR_CITY_GLOW = 0x6a0dad; // Purple for distant city glow
+
+    // Cooldown for steering sound to prevent Tone.js scheduling errors
+    const MOVE_SOUND_COOLDOWN = 100; // ms
+    let lastMoveSoundTime = 0;
+    // FIX: Tolerance for centering check
+    const CENTER_TOLERANCE = 0.15; 
+
+
+    let scene, camera, renderer, clock;
+    let playerModel, playerTargetX;
+    let enemyPixelTexture; 
+    let roadMaterial, laneLineMaterial; // References for scrolling textures
+    let cityBackground; // Reference to the city background group
+    
+    let game = {
+        score: 0,
+        distance: 0,
+        speed: 1, 
+        isRunning: false,
+        animationFrameId: null,
+        lastSpawnTime: 0,
+        spawnInterval: 500, 
+        playerLane: Math.floor(NUM_LANES / 2),
+        obstacles: [],
+        lampPosts: [], // Array to hold lamp posts
+        gameOver: false,
+        speedIncreaseInterval: null
+    };
+
+    // --- SOUND SETUP (Tone.js) ---
+    const audioContext = new Tone.Context();
+    const hitSynth = new Tone.NoiseSynth({
+        noise: { type: 'white' },
+        envelope: { attack: 0.001, decay: 0.5, sustain: 0 }
+    }).toDestination();
+    const collectSynth = new Tone.Synth({
+        oscillator: { type: 'square' },
+        envelope: { attack: 0.005, decay: 0.1, sustain: 0.05, release: 0.1 }
+    }).toDestination();
+    
+    // Switched to MonoSynth for robust rapid-fire input handling
+    const moveSynth = new Tone.MonoSynth({
+        oscillator: { type: 'sine' },
+        envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 } 
+    }).toDestination();
+
+    const sounds = {
+        hit: () => hitSynth.triggerAttackRelease('8n', Tone.now(), 0.5),
+        collect: () => collectSynth.triggerAttackRelease('D5', '16n', Tone.now(), 0.8),
+        move: (freq) => {
+            // FIX: Using Monosynth with an instantaneous attack/release duration ('64n')
+            // This is the most reliable fix for rapid key presses.
+            moveSynth.triggerAttackRelease(freq, '64n', Tone.now(), 0.5); 
+        },
+    };
+
+    // --- DOM ELEMENTS ---
+    const $score = document.getElementById('score-display');
+    const $distance = document.getElementById('distance-display');
+    const $speed = document.getElementById('speed-display');
+    const $scorePanel = document.querySelector('.score-panel');
+    const $message = document.getElementById('game-message');
+    const $messageText = document.getElementById('message-text');
+    const $startButton = document.getElementById('start-button');
+    const $gameContainer = document.getElementById('game-container');
+    const $instructions = document.getElementById('instructions');
+    const $leaderboardList = document.getElementById('leaderboard-list');
+    const $userIdDisplay = document.getElementById('user-id-display');
+    const $initialsPrompt = document.getElementById('initials-prompt');
+    const $initialsInput = document.getElementById('initials-input');
+    const $controlsText = document.getElementById('controls-text');
+
+
+    // --- FIREBASE FUNCTIONS ---
+
+    async function setupFirebaseAndAuth() {
+        if (Object.keys(firebaseConfig).length === 0) {
+            console.error("Firebase config is missing. Cannot initialize Firestore.");
+            $userIdDisplay.textContent = "Firestore Disabled";
+            return;
+        }
+
+        try {
+            const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken } = window.firebase;
+            const app = initializeApp(firebaseConfig);
+            db = window.firebase.getFirestore(app);
+            auth = getAuth(app);
+            
+            // Authenticate user
+            if (initialAuthToken) {
+                await signInWithCustomToken(auth, initialAuthToken);
+            } else {
+                await signInAnonymously(auth);
+            }
+            
+            userId = auth.currentUser.uid;
+            $userIdDisplay.textContent = `DRIVER ID: ${userId}`;
+            console.log("Firebase initialized successfully. User ID:", userId);
+
+            // Start loading the leaderboard
+            loadLeaderboard();
+
+        } catch (error) {
+            console.error("Firebase authentication error:", error);
+            $userIdDisplay.textContent = "Auth Failed";
+        }
+    }
+
+    async function saveScore(score, initials) {
+        if (!db || !userId || score === 0) return;
+        
+        // Ensure initials is a clean 3-char string, or default
+        const cleanInitials = initials ? initials.toUpperCase().substring(0, 3) : 'AAA';
+
+        try {
+            const { doc, setDoc } = window.firebase;
+            // Use the userId as the document ID
+            const scoreRef = doc(db, LEADERBOARD_COLLECTION, userId); 
+
+            await setDoc(scoreRef, {
+                score: score,
+                userId: userId,
+                initials: cleanInitials, // Save the initials
+                timestamp: Date.now()
+            }, { merge: true }); 
+
+            console.log(`Score ${score} saved with initials ${cleanInitials} for user ${userId}`);
+
+        } catch (error) {
+            console.error("Error saving score:", error);
+        }
+    }
+    
+    function loadLeaderboard() {
+        if (!db) return;
+
+        const { collection, query, limit, onSnapshot } = window.firebase;
+        const q = query(collection(db, LEADERBOARD_COLLECTION), limit(20));
+
+        onSnapshot(q, (snapshot) => {
+            let scores = [];
+            snapshot.forEach((doc) => {
+                const data = doc.data();
+                scores.push(data);
+            });
+
+            // Sort client-side by score descending
+            scores.sort((a, b) => b.score - a.score);
+
+            renderLeaderboard(scores.slice(0, 10)); 
+        }, (error) => {
+            console.error("Error loading leaderboard:", error);
+            $leaderboardList.innerHTML = "Error loading scores.";
+        });
+    }
+
+    function renderLeaderboard(scores) {
+        let html = '';
+        if (scores.length === 0) {
+            html = '<p class="text-center mt-2">No high scores yet! Be the first.</p>';
+        } else {
+            scores.forEach((item, index) => {
+                const scoreDisplay = String(item.score).padStart(5, '0');
+                const rank = index + 1;
+                const isUser = item.userId === userId;
+                // Display initials or default if missing
+                const displayInitials = item.initials || '???';
+                
+                html += `
+                    <div class="leaderboard-item ${isUser ? 'text-yellow-400' : ''}">
+                        <span>${rank}. ${displayInitials}</span>
+                        <span>${scoreDisplay}</span>
+                    </div>
+                `;
+            });
+        }
+        $leaderboardList.innerHTML = html;
+    }
+
+
+    // --- 3D UTILS & OBJECTS ---
+
+    function createPixelTexture(pixelData) {
+        const width = pixelData[0].length;
+        const height = pixelData.length;
+        const data = new Uint8Array(3 * width * height); 
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                const i = (y * width + x);
+                const color = new THREE.Color(pixelData[y][x]);
+                data[i * 3] = color.r * 255;
+                data[i * 3 + 1] = color.g * 255;
+                data[i * 3 + 2] = color.b * 255;
+            }
+        }
+
+        const texture = new THREE.DataTexture(data, width, height, THREE.RGBFormat);
+        texture.needsUpdate = true;
+        texture.minFilter = THREE.NearestFilter;
+        texture.magFilter = THREE.NearestFilter;
+        return texture;
+    }
+
+    const PIXEL_PINK = COLOR_NEON_PINK;
+    const PIXEL_BLUE = COLOR_NEON_BLUE;
+    const PIXEL_BLACK = COLOR_BLACK;
+
+    const policeCarPixelPattern = [
+        [PIXEL_BLACK, PIXEL_BLUE, PIXEL_BLUE, PIXEL_BLACK],
+        [PIXEL_PINK, PIXEL_PINK, PIXEL_PINK, PIXEL_PINK],
+        [PIXEL_PINK, PIXEL_PINK, PIXEL_PINK, PIXEL_PINK],
+        [PIXEL_PINK, PIXEL_PINK, PIXEL_PINK, PIXEL_PINK]
+    ];
+
+    // Function to create a simple checkered texture for the road
+    function createCheckeredTexture(size = 32, darkColor = 0x111111, lightColor = 0x222222) {
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const context = canvas.getContext('2d');
+        context.fillStyle = new THREE.Color(darkColor).getStyle();
+        context.fillRect(0, 0, size, size);
+        context.fillStyle = new THREE.Color(lightColor).getStyle();
+        context.fillRect(0, 0, size / 2, size / 2);
+        context.fillRect(size / 2, size / 2, size / 2, size / 2);
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(100, 100); // Repeat many times along the road
+        return texture;
+    }
+    
+    // Function to create a dashed line texture for lane markers
+    function createDashedLineTexture(lineColor = COLOR_NEON_BLUE, backgroundColor = 0x000000, dashLength = 16, gapLength = 16, width = 4) {
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = dashLength + gapLength; // Total height for one dash-gap cycle
+        const context = canvas.getContext('2d');
+
+        context.fillStyle = new THREE.Color(backgroundColor).getStyle();
+        context.fillRect(0, 0, width, canvas.height); // Fill background
+        context.fillStyle = new THREE.Color(lineColor).getStyle();
+        context.fillRect(0, 0, width, dashLength); // Draw dash
+
+        const texture = new THREE.CanvasTexture(canvas);
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        // Repeat only in T (vertical) direction for scrolling
+        texture.repeat.set(1, 1000); 
+        return texture;
+    }
+
+    function createRoad() {
+        // Road surface
+        const roadGeo = new THREE.PlaneGeometry(ROAD_WIDTH + LANE_SPACING + 2, 1000, 1, 100); // Wider for barriers
+        const roadTexture = createCheckeredTexture(64, COLOR_ROAD_DARK, COLOR_ROAD_LIGHT);
+        roadMaterial = new THREE.MeshPhongMaterial({ map: roadTexture, specular: 0x111111, shininess: 5 });
+        const road = new THREE.Mesh(roadGeo, roadMaterial);
+        road.rotation.x = -Math.PI / 2;
+        road.position.y = -PLAYER_SIZE / 2; 
+        road.position.z = -500; 
+        scene.add(road);
+
+        // Lane Lines (Neon Blue with dashes)
+        const laneLineTexture = createDashedLineTexture(COLOR_NEON_BLUE, 0x000000, 16, 16);
+        laneLineMaterial = new THREE.MeshBasicMaterial({ 
+            map: laneLineTexture, 
+            emissive: COLOR_NEON_BLUE, 
+            emissiveMap: laneLineTexture,
+            transparent: true // Needed for transparent gaps in texture
+        });
+
+        for (let i = 0; i <= NUM_LANES; i++) {
+            if (i === 0 || i === NUM_LANES) continue; // Skip edge lanes for main highway
+
+            const xPos = LANE_POSITIONS[0] - LANE_SPACING / 2 + (i * LANE_SPACING);
+            const lineGeo = new THREE.PlaneGeometry(0.2, 1000);
+            const line = new THREE.Mesh(lineGeo, laneLineMaterial);
+            line.rotation.x = -Math.PI / 2;
+            line.position.x = xPos;
+            line.position.z = -500;
+            line.position.y = road.position.y + 0.01; 
+            scene.add(line);
+        }
+
+        // Side Barriers/Guardrails
+        const barrierHeight = 2;
+        const barrierWidth = 1;
+        const barrierGeo = new THREE.BoxGeometry(barrierWidth, barrierHeight, 1000);
+        const barrierMaterial = new THREE.MeshPhongMaterial({ color: 0x444444, emissive: 0x222222, shininess: 30, specular: 0x555555 });
+
+        // Left Barrier
+        const leftBarrier = new THREE.Mesh(barrierGeo, barrierMaterial);
+        leftBarrier.position.x = LANE_POSITIONS[0] - LANE_SPACING / 2 - barrierWidth / 2;
+        leftBarrier.position.y = barrierHeight / 2 - PLAYER_SIZE / 2;
+        leftBarrier.position.z = -500;
+        scene.add(leftBarrier);
+
+        // Right Barrier
+        const rightBarrier = new THREE.Mesh(barrierGeo, barrierMaterial);
+        rightBarrier.position.x = LANE_POSITIONS[NUM_LANES - 1] + LANE_SPACING / 2 + barrierWidth / 2;
+        rightBarrier.position.y = barrierHeight / 2 - PLAYER_SIZE / 2;
+        rightBarrier.position.z = -500;
+        scene.add(rightBarrier);
+    }
+
+    function createPlayerModel() {
+        const bodyGeo = new THREE.ConeGeometry(PLAYER_SIZE * 0.8, PLAYER_SIZE * 2, 8); 
+        const bodyMat = new THREE.MeshPhongMaterial({ color: COLOR_NEON_GREEN, emissive: 0x00aa00, specular: 0x00ff00, shininess: 50 });
+        playerModel = new THREE.Mesh(bodyGeo, bodyMat);
+        playerModel.rotation.x = Math.PI / 2; // Point cone forward
+        playerModel.position.set(LANE_POSITIONS[game.playerLane], -PLAYER_SIZE * 0.4, PLAYER_Z);
+        
+        scene.add(playerModel);
+        playerTargetX = playerModel.position.x;
+        playerModel.visible = true; // Hood View
+    }
+
+    function createObstacle(lane, type, id) {
+        let mesh;
+        let material;
+        let size;
+        
+        if (type === 'enemy') {
+            size = ENEMY_SIZE;
+            const geo = new THREE.BoxGeometry(size, size, size);
+            material = new THREE.MeshPhongMaterial({ map: enemyPixelTexture, emissive: COLOR_NEON_PINK, specular: 0xff00ff, shininess: 20 });
+            mesh = new THREE.Mesh(geo, material);
+        } else { // Item (Yen)
+            const color = 0xffff00; // Yellow
+            size = ITEM_SIZE;
+            const geo = new THREE.SphereGeometry(size * 0.7, 16, 16); 
+            material = new THREE.MeshPhongMaterial({ color: color, emissive: color, specular: 0xffffee, shininess: 80 });
+            mesh = new THREE.Mesh(geo, material);
+        }
+
+        mesh.position.set(LANE_POSITIONS[lane], size / 2, -100); 
+        
+        mesh.userData = {
+            type: type,
+            value: type === 'item' ? 500 : 0,
+            size: size,
+            lane: lane,
+            id: id
+        };
+
+        scene.add(mesh);
+        return mesh;
+    }
+
+    /**
+     * Creates a single lamp post model.
+     * The model consists of a tall pole and a neon blue light cube at the top.
+     * @param {number} xPos The X position (outside the barrier)
+     * @returns {THREE.Group} The lamp post object.
+     */
+    function createLampPost(xPos) {
+        const postGroup = new THREE.Group();
+        const postHeight = 15;
+        const lightSize = 1.5;
+
+        // Pole Geometry
+        const poleGeo = new THREE.CylinderGeometry(0.2, 0.2, postHeight, 8);
+        const poleMat = new THREE.MeshPhongMaterial({ color: 0x333333, specular: 0x666666, shininess: 10 });
+        // FIX: Removed the extra 'new' keyword to fix the constructor error
+        const pole = new THREE.Mesh(poleGeo, poleMat); 
+        pole.position.y = postHeight / 2 - PLAYER_SIZE / 2;
+        postGroup.add(pole);
+
+        // Neon Light
+        const lightGeo = new THREE.BoxGeometry(lightSize, lightSize, lightSize);
+        const lightMat = new THREE.MeshBasicMaterial({ color: COLOR_NEON_BLUE, emissive: COLOR_NEON_BLUE, emissiveIntensity: 2 });
+        const lightMesh = new THREE.Mesh(lightGeo, lightMat);
+        lightMesh.position.y = postHeight - PLAYER_SIZE / 2;
+        postGroup.add(lightMesh);
+
+        // Position the entire post
+        postGroup.position.x = xPos;
+        
+        return postGroup;
+    }
+
+    function createCityBackground() {
+        cityBackground = new THREE.Group();
+        const numBuildings = 50; // A reasonable number of buildings
+        const cityWidth = 300; // Width of the city background
+        const cityDepth = 500; // Depth of the city background
+        const minHeight = 10;
+        const maxHeight = 50;
+
+        const buildingMaterial = new THREE.MeshBasicMaterial({ color: 0x000033, emissive: COLOR_CITY_GLOW, emissiveIntensity: 0.5 }); // Dark blue, purple glow
+
+        for (let i = 0; i < numBuildings; i++) {
+            const height = Math.random() * (maxHeight - minHeight) + minHeight;
+            const width = Math.random() * 10 + 5;
+            const depth = Math.random() * 10 + 5;
+            const geometry = new THREE.BoxGeometry(width, height, depth);
+            const building = new THREE.Mesh(geometry, buildingMaterial);
+
+            // Random position in the background
+            building.position.x = (Math.random() - 0.5) * cityWidth;
+            building.position.y = height / 2; // Base on the ground
+            building.position.z = (Math.random() - 0.5) * cityDepth - 200; // Further back
+            
+            cityBackground.add(building);
+        }
+
+        // Position the city far back and slightly below the horizon
+        cityBackground.position.y = -PLAYER_SIZE / 2; // Align with road base
+        cityBackground.position.z = -500; 
+        scene.add(cityBackground);
+    }
+
+    // --- CORE GAME LOGIC ---
+
+    function initGame() {
+        // Init Three.js components
+        scene = new THREE.Scene();
+        clock = new THREE.Clock();
+
+        enemyPixelTexture = createPixelTexture(policeCarPixelPattern);
+        
+        camera = new THREE.PerspectiveCamera(75, $gameContainer.clientWidth / $gameContainer.clientHeight, 0.1, 1000);
+        // HOOD VIEW: Adjust height and tilt for speed perception
+        camera.position.set(0, 1.0, PLAYER_Z + PLAYER_SIZE * 1.5); 
+        camera.rotation.x = -Math.PI / 20; // Increased downward angle for speed
+
+        renderer = new THREE.WebGLRenderer({ antialias: true }); // Antialiasing for smoother edges
+        renderer.setSize($gameContainer.clientWidth, $gameContainer.clientHeight);
+        renderer.setClearColor(0x000000); // Black background for city
+        
+        while ($gameContainer.firstChild) {
+            $gameContainer.removeChild($gameContainer.firstChild);
+        }
+        $gameContainer.appendChild(renderer.domElement);
+        
+        $gameContainer.appendChild($scorePanel);
+        $gameContainer.appendChild($message);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 0.2); // Dim ambient light
+        scene.add(ambientLight);
+
+        const pointLight = new THREE.PointLight(0xffffff, 1, 100);
+        pointLight.position.set(0, 5, -5); 
+        scene.add(pointLight);
+
+        createRoad();
+        createPlayerModel();
+        createCityBackground(); // Add the city background
+
+        game.score = 0;
+        game.distance = 0;
+        game.speed = 1;
+        game.playerLane = Math.floor(NUM_LANES / 2);
+        game.obstacles = [];
+        game.lampPosts = []; // Reset lamp posts array
+        game.gameOver = false;
+        game.lastSpawnTime = performance.now();
+        
+        updateHUD();
+        
+        showGameMessage('3D NEON SHINJUKU DRIFT', 'Press START to ignite the engine.', true);
+
+        window.addEventListener('resize', onWindowResize);
+
+        document.body.addEventListener('click', Tone.start, { once: true });
+        document.body.addEventListener('keydown', handleInput);
+    }
+    
+    function onWindowResize() {
+        const width = $gameContainer.clientWidth;
+        const height = $gameContainer.clientHeight;
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+        renderer.setSize(width, height);
+    }
+
+    function startGame() {
+        if (!game.isRunning) {
+            hideGameMessage();
+            game.isRunning = true;
+            game.animationFrameId = requestAnimationFrame(animate);
+            // FIX: Restored full setInterval call
+            game.speedIncreaseInterval = setInterval(increaseSpeed, 5000); 
+            Tone.Transport.start(); 
+        }
+    }
+
+    function submitInitialsAndRestart() {
+        const initials = $initialsInput.value.trim().toUpperCase();
+        // Save score using the entered initials
+        saveScore(Math.floor(game.score), initials); 
+        // Then initialize game for restart
+        initGame(); 
+    }
+
+    function endGame(message) {
+        if (game.animationFrameId) {
+            cancelAnimationFrame(game.animationFrameId);
+            game.animationFrameId = null;
+        }
+        if (game.speedIncreaseInterval) {
+            clearInterval(game.speedIncreaseInterval);
+            game.speedIncreaseInterval = null;
+        }
+        game.isRunning = false;
+        game.gameOver = true;
+        sounds.hit();
+        
+        // Show the Game Over screen with initials prompt
+        showGameMessage('CRASHED!', message + ` Final Score: ${Math.floor(game.score)}`, false, true); 
+        Tone.Transport.stop();
+    }
+
+    function increaseSpeed() {
+        game.speed = Math.min(game.speed + 0.1, 5.0); 
+        game.spawnInterval = Math.max(game.spawnInterval - 10, 200); 
+    }
+
+    let obstacleCounter = 0;
+    const POST_SPAWN_INTERVAL = 300; // Spawn every 300ms (3 times faster than obstacles)
+    let lastPostSpawnTime = 0;
+
+    function spawnObstacle() {
+        const isEnemy = Math.random() < 0.75;
+        let lane = Math.floor(Math.random() * NUM_LANES);
+
+        const newObstacle = createObstacle(lane, isEnemy ? 'enemy' : 'item', obstacleCounter++);
+        game.obstacles.push(newObstacle);
+        game.lastSpawnTime = performance.now();
+    }
+    
+    function spawnLampPost() {
+        // Left side is X < LANE_POSITIONS[0] - LANE_SPACING / 2
+        // Right side is X > LANE_POSITIONS[NUM_LANES - 1] + LANE_SPACING / 2
+        
+        const side = Math.random() > 0.5 ? 'left' : 'right';
+        let xPos;
+        
+        if (side === 'left') {
+            xPos = LANE_POSITIONS[0] - LANE_SPACING / 2 - 3;
+        } else {
+            xPos = LANE_POSITIONS[NUM_LANES - 1] + LANE_SPACING / 2 + 3;
+        }
+
+        const newPost = createLampPost(xPos);
+        newPost.position.z = -150; // Start slightly closer than obstacles
+        scene.add(newPost);
+        game.lampPosts.push(newPost);
+        lastPostSpawnTime = performance.now();
+    }
+
+    function handleInput(event) {
+        if (!game.isRunning) {
+            if (event.code === 'Space' || event.code === 'Enter') {
+                if (game.gameOver) {
+                    submitInitialsAndRestart(); // Submit on ENTER if game is over
+                } else {
+                    startGame(); // Start game on SPACE/ENTER
+                }
+            }
+            return;
+        }
+
+        const currentTime = performance.now();
+        
+        let newLane = game.playerLane;
+        switch (event.code) {
+            case 'ArrowLeft':
+            case 'KeyA':
+                event.preventDefault(); 
+                // FIX 1 (Lane Skip): Ignore repeated key events
+                if (event.repeat) return; 
+                newLane = Math.max(0, game.playerLane - 1);
+                break;
+            case 'ArrowRight':
+            case 'KeyD':
+                event.preventDefault(); 
+                // FIX 1 (Lane Skip): Ignore repeated key events
+                if (event.repeat) return; 
+                newLane = Math.min(NUM_LANES - 1, game.playerLane + 1);
+                break;
+        }
+        
+        if (newLane !== game.playerLane) {
+            // FIX 3 (Lane Skip): Check if the car is currently centered before allowing a new lane change.
+            const isCentered = Math.abs(playerModel.position.x - playerTargetX) < CENTER_TOLERANCE;
+
+            if (isCentered) {
+                game.playerLane = newLane;
+                playerTargetX = LANE_POSITIONS[newLane];
+                
+                // FIX 2: Only trigger sound if cooldown has passed (stabilizes Tone.js)
+                if (currentTime - lastMoveSoundTime > MOVE_SOUND_COOLDOWN) {
+                    sounds.move('C4'); 
+                    lastMoveSoundTime = currentTime;
+                }
+            }
+        }
+    }
+
+
+    // --- GAME LOOP ---
+
+    function animate(timestamp) {
+        if (!game.isRunning) return;
+
+        const delta = clock.getDelta();
+        const scrollSpeed = 50 * game.speed; 
+        const textureScrollRate = 0.1 * game.speed; 
+        const currentTime = performance.now();
+
+        // 1. Player Movement (Smooth Transition)
+        playerModel.position.x = THREE.MathUtils.lerp(playerModel.position.x, playerTargetX, 0.15);
+        
+        camera.position.x = playerModel.position.x;
+
+        // 2. Texture Scrolling to simulate movement 
+        // Road texture scrolling (main road surface)
+        if (roadMaterial && roadMaterial.map) {
+            // Near-Field Speed Boost
+            roadMaterial.map.offset.y -= textureScrollRate * 8 * delta; 
+        }
+        // Lane line texture scrolling (creates the dashing effect)
+        if (laneLineMaterial && laneLineMaterial.map) {
+            // Maximum Near-Field Speed Cue
+            laneLineMaterial.map.offset.y -= textureScrollRate * 30 * delta; 
+        }
+        
+        // City background scrolling (Parallax effect - Drastically slowed down)
+        if (cityBackground) {
+             cityBackground.position.z += scrollSpeed * delta * 0.005; // Drastically reduced city speed
+            if (cityBackground.position.z > 200) { 
+                cityBackground.position.z -= 500; // Reset Z position when it gets close
+            }
+        }
+
+        // 3. Road & Score Update
+        game.distance += scrollSpeed * delta; 
+        game.score += (10 * game.speed * delta);
+        
+        updateHUD();
+
+        // 4. Obstacle & Lamp Post Spawning
+        if (currentTime - game.lastSpawnTime > game.spawnInterval) {
+            spawnObstacle();
+        }
+        if (currentTime - lastPostSpawnTime > POST_SPAWN_INTERVAL) {
+            spawnLampPost();
+        }
+
+        // 5. Obstacle and Lamp Post Movement, Collision, and Cleanup
+        const playerBox = new THREE.Box3().setFromObject(playerModel);
+        
+        // Update and filter Obstacles
+        game.obstacles = game.obstacles.filter(obstacle => {
+            obstacle.position.z += scrollSpeed * delta;
+
+            const obstacleBox = new THREE.Box3().setFromObject(obstacle);
+            const isColliding = playerBox.intersectsBox(obstacleBox);
+
+            if (isColliding) {
+                if (obstacle.userData.type === 'enemy') {
+                    endGame('The Patrol Car smashed your neon ride!');
+                    scene.remove(obstacle);
+                    return false;
+                } else if (obstacle.userData.type === 'item') {
+                    game.score += obstacle.userData.value;
+                    sounds.collect();
+                    scene.remove(obstacle);
+                    return false;
+                }
+            }
+
+            // Clean up when objects pass behind the camera
+            if (obstacle.position.z > 10) { 
+                 scene.remove(obstacle);
+                return false;
+            }
+
+            return true;
+        });
+
+        // Update and filter Lamp Posts
+        game.lampPosts = game.lampPosts.filter(post => {
+            post.position.z += scrollSpeed * delta;
+            
+            // Clean up when objects pass behind the camera
+            if (post.position.z > 10) { 
+                 scene.remove(post);
+                return false;
+            }
+            return true;
+        });
+        
+        // 6. Render
+        renderer.render(scene, camera);
+
+        // 7. Next Frame
+        game.animationFrameId = requestAnimationFrame(animate);
+    }
+
+    // --- UI/HUD UPDATES ---
+    
+    function updateHUD() {
+        const displayScore = Math.floor(game.score);
+        $score.textContent = `SCORE: ${String(displayScore).padStart(5, '0')}`;
+        $distance.textContent = `DISTANCE: ${Math.floor(game.distance)}`;
+        $speed.textContent = `SPEED: x${game.speed.toFixed(1)}`;
+    }
+
+    function showGameMessage(title, text, isStart, isGameOver = false) {
+        document.getElementById('game-message').querySelector('h1').textContent = title;
+        $messageText.textContent = text;
+        
+        if (isStart) {
+            $startButton.textContent = 'START RACE';
+            $startButton.onclick = startGame;
+            $initialsPrompt.classList.add('hidden');
+            $controlsText.classList.remove('hidden');
+        } else if (isGameOver) {
+            $startButton.textContent = 'SUBMIT & RESTART';
+            $startButton.onclick = submitInitialsAndRestart;
+            $initialsPrompt.classList.remove('hidden');
+            $controlsText.classList.add('hidden');
+            // Focus on input when the game over screen appears
+            $initialsInput.focus();
+            $initialsInput.value = ''; // Clear previous initials
+        } else {
+            // Should not happen, but for safety
+            $startButton.textContent = 'RESTART';
+            $startButton.onclick = initGame;
+        }
+
+        $message.style.display = 'flex';
+    }
+    
+    function hideGameMessage() {
+        $message.style.display = 'none';
+        $startButton.onclick = null;
+    }
+
+
+    // --- INITIALIZATION ---
+    window.initApp = async () => {
+        initGame();
+        document.addEventListener('keydown', handleInput);
+        
+        await setupFirebaseAndAuth();
+    };
+
+</script>
